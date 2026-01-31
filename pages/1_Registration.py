@@ -6,22 +6,67 @@ import time
 import sqlite3
 import json
 import streamlit as st
+import threading
+from PIL import Image
 
 def deep_data_extract(img):
-    embedding=None
-    faces=[]
-    facial_data=[]
+    embedding = None
+    faces = []
+    facial_data = []
+    
+    print(f"\n[DEBUG] ===== FACE DETECTION START =====")
+    print(f"[DEBUG] Image shape: {img.shape}")
+    print(f"[DEBUG] Image dtype: {img.dtype}")
+    print(f"[DEBUG] Image min/max values: {img.min()}/{img.max()}")
+    
     try:
-        embedding = DeepFace.represent(img, model_name='Facenet',detector_backend='ssd')
-        if embedding:
-          for  i in range(len(embedding)):
-            x, y, w, h = embedding[i]['facial_area']['x'], embedding[i]['facial_area']['y'], embedding[i]['facial_area']['w'], embedding[i]['facial_area']['h']
-            x1, y1, x2, y2 = x, y, x+w, y+h
-            faces.append((x1, y1, x2, y2 ))
-            facial_data.append(embedding[i]['embedding'])
-    except:
-        pass
-    return faces,facial_data
+        # Try with different backends for more robust detection
+        backends = ['opencv', 'ssd', 'mtcnn', 'retinaface']
+        
+        for backend in backends:
+            try:
+                print(f"\n[DEBUG] Attempting backend: {backend}")
+                embedding = DeepFace.represent(img, model_name='Facenet', detector_backend=backend, enforce_detection=False)
+                
+                if embedding and len(embedding) > 0:
+                    print(f"[DEBUG] ✅ SUCCESS with {backend}!")
+                    print(f"[DEBUG] Found {len(embedding)} face(s)")
+                    break
+                else:
+                    print(f"[DEBUG] Backend {backend} returned empty result")
+            except Exception as backend_error:
+                error_msg = str(backend_error)[:150]
+                print(f"[DEBUG] ❌ Backend {backend} failed: {error_msg}")
+                continue
+        
+        if embedding and len(embedding) > 0:
+            print(f"\n[DEBUG] Processing {len(embedding)} detected face(s)...")
+            for i in range(len(embedding)):
+                try:
+                    x = embedding[i]['facial_area']['x']
+                    y = embedding[i]['facial_area']['y']
+                    w = embedding[i]['facial_area']['w']
+                    h = embedding[i]['facial_area']['h']
+                    x1, y1, x2, y2 = x, y, x+w, y+h
+                    faces.append((x1, y1, x2, y2))
+                    
+                    emb = embedding[i]['embedding']
+                    facial_data.append(emb)
+                    print(f"[DEBUG] Face {i}: coords=({x1},{y1},{x2},{y2}), embedding_length={len(emb)}")
+                except Exception as e:
+                    print(f"[DEBUG] ❌ Error processing face {i}: {e}")
+        else:
+            print(f"\n[DEBUG] ❌ No embedding returned from any backend")
+            
+    except Exception as e:
+        print(f"\n[DEBUG] ❌ CRITICAL ERROR in face detection: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print(f"[DEBUG] ===== FACE DETECTION END =====")
+    print(f"[DEBUG] FINAL RESULT: {len(faces)} faces, {len(facial_data)} embeddings\n")
+    
+    return faces, facial_data
 
 
 def rgb_to_bgr(rgb_color):
@@ -145,43 +190,89 @@ def time_count(img,num_seconds):
 
     
 import os 
-def video_capture(name,id_number,branch_name,designation):
-    cap = cv2.VideoCapture(0)
-    # cap = cv2.VideoCapture("./videos/2.mp4")
-    pTime = 0
-    FRAME_WINDOW = st.image([]) 
-    t0=time.time()
-    while True:
-        ret, img = cap.read()
-        # img=cv2.flip(img,1)
-        faces,facial_data=deep_data_extract(img)
-        show_img=white_overlay(img)
-        
-        
-        if len(faces)!=0 and len(facial_data)!=0:
-            if len(faces)==len(facial_data):
-                # print(faces[0],facial_data[0])
-                face_data=facial_data[0]
-                face_data=convert_string(face_data) 
-                # st.write(face_data, name, id_number, branch_name, designation)
-
-                add_attendance_record(face_data, name, id_number, branch_name, designation)
-                x1,y1,x2,y2=faces[0]
-                l = int(0.1 * math.sqrt((x2-x1)**2 + (y2-y1)**2))
-                draw_img=drawBox(img, x1, y1, x2, y2, l=l, t=5, rt=1, text=name, id=id_number,display_id=True,draw_rect=True,color=(2, 240, 228),text_color=(255,255,255))
-                overlay = white_overlay(draw_img)
-                show_img=overlay     
-        show_img,pTime=fps_display(show_img,pTime)  
-        t1 = time.time() 
-        num_seconds = t1 - t0 
-        show_img=overlay_icon(show_img) 
-        show_img=time_count(show_img,num_seconds)   
-        if num_seconds > 30:  
-            break
-        frame = cv2.cvtColor(show_img, cv2.COLOR_BGR2RGB)
-        FRAME_WINDOW.image(frame)
-    FRAME_WINDOW.image([])
-    cap.release()
+def video_capture(name, id_number, branch_name, designation):
+    st.write("📷 Take a photo using the camera below")
+    st.write("Make sure your face is **clearly visible, well-lit, and centered**")
+    
+    # Use Streamlit's built-in camera input
+    picture = st.camera_input("Capture your photo", key=f"camera_{id_number}_{int(time.time())}")
+    
+    if picture is not None:
+        try:
+            st.write("🔍 Processing your photo...")
+            print(f"[DEBUG] Camera input received, processing...")
+            
+            # Create temp directory if it doesn't exist
+            if not os.path.exists("temp"):
+                os.makedirs("temp")
+            
+            # Read image from bytes
+            img = Image.open(picture)
+            img_array = np.array(img)
+            print(f"[DEBUG] Image received: shape={img_array.shape}, dtype={img_array.dtype}")
+            
+            # Save the original image for debugging
+            temp_filename = f"captured_{id_number}_{int(time.time())}.jpg"
+            temp_path = os.path.join("temp", temp_filename)
+            
+            # Convert to BGR and save
+            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+            success = cv2.imwrite(temp_path, img_bgr)
+            print(f"[DEBUG] Saving image: {temp_path}, success={success}")
+            
+            if success:
+                print(f"[DEBUG] ✅ Image saved successfully to: {temp_path}")
+                st.write(f"✅ Image saved to: `{temp_path}`")
+            else:
+                print(f"[DEBUG] ❌ Failed to save image")
+                st.error("❌ Failed to save image")
+            
+            # Try face detection
+            print(f"[DEBUG] Starting face detection...")
+            faces, facial_data = deep_data_extract(img_bgr)
+            print(f"[DEBUG] Face detection result: {len(faces)} faces, {len(facial_data)} embeddings")
+            
+            st.write(f"🔎 **Detection Result:** Found {len(faces)} face(s)")
+            
+            if len(faces) > 0 and len(facial_data) > 0:
+                try:
+                    # Save face data
+                    face_data = facial_data[0]
+                    print(f"[DEBUG] Saving face embedding...")
+                    
+                    face_data_str = convert_string(face_data)
+                    add_attendance_record(face_data_str, name, id_number, branch_name, designation)
+                    print(f"[DEBUG] ✅ Face data saved to database")
+                    
+                    st.success("✅ Face captured and registered successfully!")
+                    st.balloons()
+                    
+                    # Display the captured image with bounding box
+                    x1, y1, x2, y2 = faces[0]
+                    img_display = img_bgr.copy()
+                    cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    st.image(cv2.cvtColor(img_display, cv2.COLOR_BGR2RGB), caption="Face Detected", use_column_width=True)
+                    
+                except Exception as save_error:
+                    print(f"[DEBUG] ❌ Error saving face: {save_error}")
+                    st.error(f"❌ Error saving face data: {str(save_error)}")
+                    
+            else:
+                st.error("❌ No face detected in the image.")
+                st.warning("**DEBUGGING INFO:**")
+                st.info(f"✅ Image was saved to: `temp/{temp_filename}`")
+                st.write("**Tips for better detection:**")
+                st.write("- Use good lighting (no shadows on face)")
+                st.write("- Face should be centered and take up 50% of frame")
+                st.write("- Look directly at camera")
+                st.write("- Remove glasses if possible")
+                
+        except Exception as e:
+            print(f"[DEBUG] ❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            st.error(f"❌ Error: {str(e)}")
+            st.info("Please reload and try taking the photo again")
 # st.title("Registration")
 
 
@@ -224,9 +315,15 @@ def add_attendance_record(face_data, name, id_number, branch_name, designation):
         print("An error occurred:", error)
 
 def convert_string(face_data):
-    string_face_data = json.dumps(face_data)
-    string_face_data = "[" + string_face_data[1:-1] + "]"
-    return string_face_data
+    try:
+        print(f"[DEBUG] convert_string input type: {type(face_data)}")
+        print(f"[DEBUG] convert_string input length: {len(face_data) if isinstance(face_data, list) else 'N/A'}")
+        string_face_data = json.dumps(face_data)
+        print(f"[DEBUG] JSON string length: {len(string_face_data)}")
+        return string_face_data
+    except Exception as e:
+        print(f"[DEBUG] ❌ convert_string error: {e}")
+        raise
 
 
 
@@ -338,7 +435,6 @@ if submit:
             st.write(f'Designation: {email}')
             st.markdown('<p style="color:green">Please wait for a few seconds while the camera is opening...</p>', unsafe_allow_html=True)
             video_capture(name,id_number,branch_name,designation)
-            st.success("Data saved successfully")
         else:
             st.error(f'{designation} email: {email} already exists')
             
