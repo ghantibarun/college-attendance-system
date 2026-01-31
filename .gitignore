@@ -1,0 +1,37 @@
+# Virtual environment folders
+.venv/
+myenv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Byte-compiled / optimized / DLL files
+*.so
+*.pyd
+*.dll
+
+# SQLite database files (ignore if not needed in repo)
+*.sqlite
+
+# Temporary files
+temp/
+*.log
+*.tmp
+
+# Excel / CSV reports (ignore if they are generated)
+*.csv
+*.xlsx
+
+# VS Code / PyCharm / IDE settings
+.vscode/
+.idea/
+
+# Python egg / build / dist files
+*.egg-info/
+dist/
+build/
+
+# Environment variable files
+.env
